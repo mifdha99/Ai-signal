@@ -216,13 +216,13 @@ object TechnicalAnalysisEngine {
     }
 
     fun calculateEmaSeries(values: List<Double>, period: Int): List<Double> {
-        if (values.isEmpty()) return emptyList()
+        if (values.isEmpty() || period <= 0) return emptyList()
         val k = 2.0 / (period + 1.0)
         val result = ArrayList<Double>(values.size)
         var current = values.first()
         result.add(current)
         for (i in 1 until values.size) {
-            current = values[i] * k + current * (1.0 - k)
+            current = (values[i] * k) + (current * (1.0 - k))
             result.add(current)
         }
         return result
@@ -274,3 +274,12 @@ object TechnicalAnalysisEngine {
         return atr
     }
 }
+
+/**
+ * Top-level convenience functions to ensure backwards and cross-component compatibility.
+ */
+fun calculateEmaSeries(values: List<Double>, period: Int): List<Double> =
+    TechnicalAnalysisEngine.calculateEmaSeries(values, period)
+
+fun emaSeries(values: List<Double>, period: Int): List<Double> =
+    TechnicalAnalysisEngine.calculateEmaSeries(values, period)

@@ -39,6 +39,19 @@ class TechnicalAnalysisEngineTest {
         // In strong rising prices, EMA lags slightly behind current price
         assertTrue("EMA should be less than latest price", ema3.last() < prices.last())
         assertTrue("EMA should be higher than initial price", ema3.last() > prices.first())
+
+        // Top-level function test
+        val emaTopLevel = com.mifdha99.universalsignal.engine.calculateEmaSeries(prices, 3)
+        assertEquals(ema3, emaTopLevel)
+    }
+
+    @Test
+    fun testEmaEdgeCases() {
+        // Empty list should return emptyList
+        assertTrue(TechnicalAnalysisEngine.calculateEmaSeries(emptyList(), 9).isEmpty())
+        // Invalid period <= 0 should return emptyList
+        assertTrue(TechnicalAnalysisEngine.calculateEmaSeries(listOf(10.0, 20.0), 0).isEmpty())
+        assertTrue(TechnicalAnalysisEngine.calculateEmaSeries(listOf(10.0, 20.0), -5).isEmpty())
     }
 
     @Test
