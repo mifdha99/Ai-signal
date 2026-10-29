@@ -39,7 +39,7 @@ private val Panel = Color(0xFF151D30)
 private val Muted = Color(0xFF9CAAC2)
 private val Blue = Color(0xFF69A7FF)
 
-class MainActivity : ComponentActivity() {
+open class MainActivity : ComponentActivity() {
 
     private lateinit var prefs: SharedPreferences
     private lateinit var repository: MarketRepository
