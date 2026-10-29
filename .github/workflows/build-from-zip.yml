@@ -45,28 +45,20 @@ jobs:
       - name: Verify Gradle
         run: gradle --version
 
-      - name: Check project ZIP
+      - name: Extract project if ZIP exists
         run: |
-          if [ ! -f "UniversalSignalAI-Android-Project.zip" ]; then
-            echo "ERROR: File ZIP proyek tidak ditemukan."
-            echo "Pastikan ZIP berada di halaman utama repository."
-            echo "Nama file harus UniversalSignalAI-Android-Project.zip"
-            exit 1
+          if [ -f "UniversalSignalAI-Android-Project.zip" ]; then
+            mkdir -p extracted
+            unzip -q UniversalSignalAI-Android-Project.zip -d extracted
+          else
+            mkdir -p extracted/UniversalSignalAI
+            cp -r app build.gradle.kts settings.gradle.kts gradle.properties extracted/UniversalSignalAI/
           fi
 
-      - name: Extract project
+      - name: Run Unit Tests
+        working-directory: extracted/UniversalSignalAI
         run: |
-          mkdir -p extracted
-
-          unzip -q \
-            UniversalSignalAI-Android-Project.zip \
-            -d extracted
-
-          if [ ! -f "extracted/UniversalSignalAI/app/build.gradle.kts" ]; then
-            echo "ERROR: Struktur proyek tidak sesuai."
-            find extracted -maxdepth 4 -type f
-            exit 1
-          fi
+          gradle --no-daemon testDebugUnitTest
 
       - name: Build Debug APK
         working-directory: extracted/UniversalSignalAI
@@ -76,13 +68,11 @@ jobs:
       - name: Verify APK
         run: |
           APK="extracted/UniversalSignalAI/app/build/outputs/apk/debug/app-debug.apk"
-
           if [ ! -f "$APK" ]; then
             echo "ERROR: APK tidak ditemukan."
             find extracted/UniversalSignalAI/app/build/outputs -type f || true
             exit 1
           fi
-
           ls -lh "$APK"
 
       - name: Upload APK artifact

@@ -1,0 +1,6 @@
+{
+  "name": "Universal Signal AI",
+  "description": "Technical analysis and trading signal assistant powered by real-time Binance crypto market data, EMA crossovers, RSI, and MACD indicators.",
+  "permissions": [],
+  "capabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
