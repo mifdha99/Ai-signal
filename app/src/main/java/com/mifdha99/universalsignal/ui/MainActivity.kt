@@ -13,26 +13,30 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.FavoriteBorder
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.mifdha99.universalsignal.data.model.*
 import com.mifdha99.universalsignal.data.repository.MarketRepository
 import com.mifdha99.universalsignal.engine.TechnicalAnalysisEngine
 import com.mifdha99.universalsignal.ui.components.CandleChart
 import com.mifdha99.universalsignal.ui.components.SignalCard
 import com.mifdha99.universalsignal.ui.components.TechnicalIndicatorCard
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 private val Bg = Color(0xFF0B1020)
 private val Panel = Color(0xFF151D30)
@@ -74,6 +78,7 @@ fun MainScreen(
     onSaveApiKey: (String) -> Unit
 ) {
     val scope = rememberCoroutineScope()
+    val lifecycleOwner = LocalLifecycleOwner.current
 
     var selectedCategory by remember { mutableStateOf(AssetCategory.CRYPTO) }
     var selectedInstrument by remember { mutableStateOf(DefaultInstruments.allInstruments.first()) }
@@ -88,8 +93,31 @@ fun MainScreen(
     var result by remember { mutableStateOf<SignalResult?>(null) }
     var candlesList by remember { mutableStateOf<List<Candle>>(emptyList()) }
     var error by remember { mutableStateOf("") }
+    var warningMessage by remember { mutableStateOf("") }
     var showSettingsDialog by remember { mutableStateOf(false) }
     var apiKeyInput by remember { mutableStateOf(repository.getTwelveDataApiKey()) }
+
+    // Auto-Refresh state (15s default: ON)
+    var autoRefreshEnabled by remember { mutableStateOf(true) }
+    var secondsRemaining by remember { mutableStateOf(15) }
+    var backoffSecondsRemaining by remember { mutableStateOf(0) }
+    var isAppInForeground by remember { mutableStateOf(true) }
+    var lastResponseTime by remember { mutableStateOf("") }
+
+    // Lifecycle observer to pause auto-refresh in background and resume in foreground
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> isAppInForeground = true
+                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> isAppInForeground = false
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     val filteredInstruments = remember(selectedCategory, searchQuery, favorites) {
         val list = DefaultInstruments.getByCategory(selectedCategory)
@@ -99,9 +127,15 @@ fun MainScreen(
         }
     }
 
-    fun executeAnalysis(forceRefresh: Boolean = false) {
+    fun executeAnalysis(forceRefresh: Boolean = false, isAuto: Boolean = false) {
+        // Prevent concurrent requests
+        if (loading) return
         loading = true
-        error = ""
+        if (!isAuto) {
+            error = ""
+            warningMessage = ""
+        }
+
         scope.launch {
             try {
                 val (candles, providerName) = repository.getCandles(
@@ -116,10 +150,35 @@ fun MainScreen(
                     selectedTimeframe,
                     providerName
                 )
+                lastResponseTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+                error = ""
+                warningMessage = ""
+                backoffSecondsRemaining = 0
+                secondsRemaining = 15
             } catch (e: Exception) {
-                candlesList = emptyList()
-                result = null
-                error = e.message ?: "Gagal mengambil data dari provider."
+                val isRateLimit = e is MarketDataException.RateLimitException ||
+                        e.message?.contains("rate limit", ignoreCase = true) == true ||
+                        e.message?.contains("429", ignoreCase = true) == true
+
+                if (isRateLimit) {
+                    backoffSecondsRemaining = 30
+                }
+
+                val errMsg = e.message ?: "Gagal mengambil data dari provider."
+
+                // If previous result exists, retain it and display a clear warning banner
+                if (result != null) {
+                    warningMessage = if (isRateLimit) {
+                        "Rate limit terlampaui. Auto-refresh dijeda 30 detik. Menampilkan analisis terakhir ($lastResponseTime)."
+                    } else {
+                        "Pembaruan otomatis gagal: $errMsg. Menampilkan analisis terakhir ($lastResponseTime)."
+                    }
+                } else {
+                    candlesList = emptyList()
+                    result = null
+                    error = errMsg
+                }
+                secondsRemaining = 15
             } finally {
                 loading = false
             }
@@ -128,7 +187,30 @@ fun MainScreen(
 
     // Auto-analyze when asset or timeframe changes
     LaunchedEffect(selectedInstrument, selectedTimeframe) {
-        executeAnalysis()
+        secondsRemaining = 15
+        backoffSecondsRemaining = 0
+        executeAnalysis(forceRefresh = true, isAuto = false)
+    }
+
+    // Auto-refresh countdown & execution loop (15s interval)
+    LaunchedEffect(autoRefreshEnabled, isAppInForeground, selectedInstrument, selectedTimeframe) {
+        if (!autoRefreshEnabled || !isAppInForeground) return@LaunchedEffect
+
+        secondsRemaining = 15
+        while (isActive) {
+            delay(1000L)
+            if (backoffSecondsRemaining > 0) {
+                backoffSecondsRemaining--
+            } else {
+                secondsRemaining--
+                if (secondsRemaining <= 0) {
+                    if (!loading) {
+                        executeAnalysis(forceRefresh = true, isAuto = true)
+                    }
+                    secondsRemaining = 15
+                }
+            }
+        }
     }
 
     Column(
@@ -153,7 +235,7 @@ fun MainScreen(
                     fontWeight = FontWeight.Black
                 )
                 Text(
-                    text = "SINYAL TEKNIKAL • MULTI-PROVIDER ENGINE",
+                    text = "SINYAL TEKNIKAL • AUTO-REFRESH 15S",
                     color = Muted,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold
@@ -166,6 +248,124 @@ fun MainScreen(
         }
 
         Spacer(Modifier.height(14.dp))
+
+        // Auto-Refresh Status & Control Bar
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Panel),
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .background(
+                                    if (!isAppInForeground) Color(0xFFF59E0B)
+                                    else if (autoRefreshEnabled) Color(0xFF27D69B)
+                                    else Color(0xFF9CAAC2),
+                                    RoundedCornerShape(4.dp)
+                                )
+                        )
+                        Text(
+                            text = if (!isAppInForeground) "AUTO-REFRESH DIJEDA (BACKGROUND)"
+                            else if (backoffSecondsRemaining > 0) "RATE LIMIT BACKOFF (${backoffSecondsRemaining}s)"
+                            else if (autoRefreshEnabled) "AUTO-REFRESH AKTIF (15s)"
+                            else "AUTO-REFRESH NONAKTIF",
+                            color = if (autoRefreshEnabled && isAppInForeground) Color.White else Muted,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    if (lastResponseTime.isNotBlank()) {
+                        Text(
+                            text = "Pembaruan terakhir: $lastResponseTime",
+                            color = Muted,
+                            fontSize = 10.sp
+                        )
+                    }
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (autoRefreshEnabled && isAppInForeground && backoffSecondsRemaining == 0) {
+                        Box(
+                            modifier = Modifier
+                                .background(Blue.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = "${secondsRemaining}s",
+                                color = Blue,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                        }
+                    }
+
+                    Switch(
+                        checked = autoRefreshEnabled,
+                        onCheckedChange = {
+                            autoRefreshEnabled = it
+                            if (it) {
+                                secondsRemaining = 15
+                                backoffSecondsRemaining = 0
+                            }
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color(0xFF07101F),
+                            checkedTrackColor = Color(0xFF27D69B),
+                            uncheckedThumbColor = Color(0xFF9CAAC2),
+                            uncheckedTrackColor = Color(0xFF1E293B)
+                        )
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        // Retained Data Warning (When auto-refresh fails but last analysis is kept)
+        if (warningMessage.isNotBlank()) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF332612)),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Info,
+                        contentDescription = null,
+                        tint = Color(0xFFF59E0B),
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        text = warningMessage,
+                        color = Color(0xFFFDE68A),
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        }
 
         // Category Tabs
         Row(
@@ -307,9 +507,9 @@ fun MainScreen(
 
                 Spacer(Modifier.height(14.dp))
 
-                // Action Button
+                // Manual Action Button (ANALISIS SEKARANG)
                 Button(
-                    onClick = { executeAnalysis(forceRefresh = true) },
+                    onClick = { executeAnalysis(forceRefresh = true, isAuto = false) },
                     enabled = !loading,
                     modifier = Modifier.fillMaxWidth().height(50.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Blue),
@@ -318,7 +518,7 @@ fun MainScreen(
                     if (loading) {
                         CircularProgressIndicator(color = Color(0xFF07101F), modifier = Modifier.size(20.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("MENGANALISIS...", color = Color(0xFF07101F), fontWeight = FontWeight.Bold)
+                        Text("MENGAMBIL DATA...", color = Color(0xFF07101F), fontWeight = FontWeight.Bold)
                     } else {
                         Icon(Icons.Default.Refresh, contentDescription = null, tint = Color(0xFF07101F))
                         Spacer(Modifier.width(6.dp))
@@ -330,7 +530,7 @@ fun MainScreen(
 
         Spacer(Modifier.height(14.dp))
 
-        // Error Banner
+        // Fatal Error Banner
         if (error.isNotBlank()) {
             Card(
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF3A1B2A)),
@@ -343,7 +543,7 @@ fun MainScreen(
                     Text(error, color = Color.White, fontSize = 12.sp, lineHeight = 16.sp)
                     Spacer(Modifier.height(8.dp))
                     Button(
-                        onClick = { executeAnalysis(forceRefresh = true) },
+                        onClick = { executeAnalysis(forceRefresh = true, isAuto = false) },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF5D70)),
                         modifier = Modifier.align(Alignment.End),
                         shape = RoundedCornerShape(8.dp)
@@ -379,7 +579,7 @@ fun MainScreen(
                 Text("PENTING & KETERBUKAAN RISIKO", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "Universal Signal AI menggunakan model konfluensi aturan teknikal objektif (EMA, RSI, MACD, ATR). Sinyal BUY/SELL/WAIT bukan jaminan keuntungan dan bukan prediksi tanpa risiko. Gunakan stop-loss dan manajemen risiko yang terukur.",
+                    "Universal Signal AI menggunakan model konfluensi aturan teknikal objektif (EMA, RSI, MACD, ATR) yang diperbarui setiap 15 detik. Sinyal BUY/SELL/WAIT bukan jaminan keuntungan dan bukan prediksi tanpa risiko. Gunakan stop-loss dan manajemen risiko yang terukur.",
                     color = Muted,
                     fontSize = 11.sp,
                     lineHeight = 15.sp
@@ -427,7 +627,7 @@ fun MainScreen(
                     onClick = {
                         onSaveApiKey(apiKeyInput)
                         showSettingsDialog = false
-                        executeAnalysis(forceRefresh = true)
+                        executeAnalysis(forceRefresh = true, isAuto = false)
                     }
                 ) {
                     Text("Simpan", color = Blue, fontWeight = FontWeight.Bold)

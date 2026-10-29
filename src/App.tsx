@@ -111,15 +111,29 @@ export default function App() {
   const [result, setResult] = useState<SignalResult | null>(null);
   const [indicatorData, setIndicatorData] = useState<IndicatorData | null>(null);
   const [error, setError] = useState<string>('');
+  const [warningMessage, setWarningMessage] = useState<string>('');
   const [updatedAt, setUpdatedAt] = useState<string>('');
   
   const [showChart, setShowChart] = useState<boolean>(true);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
-  const [autoRefresh, setAutoRefresh] = useState<boolean>(false);
+  const [autoRefresh, setAutoRefresh] = useState<boolean>(true); // Rule 1: Aktif secara default
+  const [secondsRemaining, setSecondsRemaining] = useState<number>(15); // Rule 2: 15 detik
+  const [backoffSeconds, setBackoffSeconds] = useState<number>(0);
+  const [isTabVisible, setIsTabVisible] = useState<boolean>(true);
+
   const [history, setHistory] = useState<SignalResult[]>([]);
   const [showHistoryModal, setShowHistoryModal] = useState<boolean>(false);
   const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
   const [keyInput, setKeyInput] = useState<string>(twelveDataKey);
+
+  // Tab visibility listener (Rule 13: jeda saat background, lanjutkan saat aktif)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      setIsTabVisible(document.visibilityState === 'visible');
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
 
   const filteredInstruments = useMemo(() => {
     return INSTRUMENTS.filter((item) => {
@@ -164,9 +178,14 @@ export default function App() {
     } catch {}
   }, [soundEnabled]);
 
-  const handleAnalyze = useCallback(async () => {
+  const handleAnalyze = useCallback(async (isAuto: boolean = false) => {
+    if (loading) return; // Rule 10: Jangan jalankan permintaan baru jika sebelumnya belum selesai
     setLoading(true);
-    setError('');
+    if (!isAuto) {
+      setError('');
+      setWarningMessage('');
+    }
+
     try {
       const { candles, providerName } = await fetchMarketCandles(instrument, frame, twelveDataKey);
       const { signal, indicatorData: indData } = analyzeCandles(candles, instrument, frame, providerName);
@@ -175,25 +194,59 @@ export default function App() {
       setIndicatorData(indData);
       setUpdatedAt(new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
       setHistory((prev) => [signal, ...prev.slice(0, 19)]);
+      setError('');
+      setWarningMessage('');
+      setBackoffSeconds(0);
+      setSecondsRemaining(15);
       playSignalSound(signal.side);
     } catch (e: any) {
-      setError(e?.message || 'Data tidak berhasil diambil. Periksa koneksi internet atau coba lagi.');
+      const errMsg = e?.message || 'Data tidak berhasil diambil. Periksa koneksi internet atau coba lagi.';
+      const isRateLimit = errMsg.includes('429') || errMsg.toLowerCase().includes('rate limit');
+      if (isRateLimit) {
+        setBackoffSeconds(30);
+      }
+
+      // Rule 9: Pertahankan hasil terakhir jika API gagal
+      if (result) {
+        setWarningMessage(isRateLimit 
+          ? 'Rate limit provider terlampaui. Auto-refresh dijeda 30 detik. Menampilkan analisis terakhir.'
+          : `Pembaruan otomatis gagal: ${errMsg}. Menampilkan data analisis sebelumnya.`
+        );
+      } else {
+        setError(errMsg);
+      }
+      setSecondsRemaining(15);
     } finally {
       setLoading(false);
     }
-  }, [instrument, frame, twelveDataKey, playSignalSound]);
+  }, [instrument, frame, twelveDataKey, loading, result, playSignalSound]);
 
   useEffect(() => {
-    handleAnalyze();
+    setSecondsRemaining(15);
+    setBackoffSeconds(0);
+    handleAnalyze(false);
   }, [instrument, frame]);
 
+  // 15-second Auto-refresh countdown loop
   useEffect(() => {
-    if (!autoRefresh) return;
+    if (!autoRefresh || !isTabVisible) return;
+
     const interval = setInterval(() => {
-      handleAnalyze();
-    }, 30000);
+      setBackoffSeconds((b) => {
+        if (b > 0) return b - 1;
+        setSecondsRemaining((sec) => {
+          if (sec <= 1) {
+            handleAnalyze(true);
+            return 15;
+          }
+          return sec - 1;
+        });
+        return 0;
+      });
+    }, 1000);
+
     return () => clearInterval(interval);
-  }, [autoRefresh, handleAnalyze]);
+  }, [autoRefresh, isTabVisible, handleAnalyze]);
 
   const isBuy = result?.side === 'BUY';
   const isSell = result?.side === 'SELL';
@@ -215,10 +268,10 @@ export default function App() {
                 ? 'bg-blue-500/20 text-[#69A7FF] border-blue-500/40' 
                 : 'bg-slate-900/60 text-slate-400 border-slate-800 hover:text-white'
             }`}
-            title="Auto refresh setiap 30 detik"
+            title="Auto refresh setiap 15 detik"
           >
             <RefreshCw className={`w-3 h-3 ${autoRefresh ? 'animate-spin' : ''}`} />
-            <span>30s: {autoRefresh ? 'ON' : 'OFF'}</span>
+            <span>15s: {autoRefresh ? 'ON' : 'OFF'}</span>
           </button>
 
           <button
@@ -265,6 +318,75 @@ export default function App() {
             Sinyal Teknikal • Mode Analisis Multi-Aset
           </p>
         </div>
+
+        {/* Auto-Refresh Status & Control Bar */}
+        <div className="w-full bg-[#151D30] rounded-2xl border border-slate-800/80 p-3.5 mb-3 shadow-lg flex items-center justify-between">
+          <div className="flex flex-col">
+            <div className="flex items-center gap-2">
+              <span
+                className={`w-2.5 h-2.5 rounded-full ${
+                  !isTabVisible
+                    ? 'bg-amber-400'
+                    : backoffSeconds > 0
+                    ? 'bg-amber-500 animate-pulse'
+                    : autoRefresh
+                    ? 'bg-[#27D69B] animate-pulse'
+                    : 'bg-slate-500'
+                }`}
+              />
+              <span className={`text-xs font-bold tracking-wide ${autoRefresh && isTabVisible ? 'text-white' : 'text-[#9CAAC2]'}`}>
+                {!isTabVisible
+                  ? 'AUTO-REFRESH DIJEDA (TAB BACKGROUND)'
+                  : backoffSeconds > 0
+                  ? `RATE LIMIT BACKOFF (${backoffSeconds}s)`
+                  : autoRefresh
+                  ? 'AUTO-REFRESH AKTIF (15s)'
+                  : 'AUTO-REFRESH NONAKTIF'}
+              </span>
+            </div>
+            {updatedAt && (
+              <span className="text-[10px] text-[#9CAAC2] mt-0.5 ml-4.5">
+                Pembaruan terakhir: {updatedAt}
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2.5">
+            {autoRefresh && isTabVisible && backoffSeconds === 0 && (
+              <span className="text-xs font-mono font-black text-[#69A7FF] bg-blue-500/10 border border-blue-500/30 px-2.5 py-1 rounded-lg">
+                {secondsRemaining}s
+              </span>
+            )}
+            <button
+              onClick={() => {
+                const nextState = !autoRefresh;
+                setAutoRefresh(nextState);
+                if (nextState) {
+                  setSecondsRemaining(15);
+                  setBackoffSeconds(0);
+                }
+              }}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
+                autoRefresh ? 'bg-[#27D69B]' : 'bg-slate-700'
+              }`}
+              title={autoRefresh ? 'Nonaktifkan Auto-Refresh' : 'Aktifkan Auto-Refresh (15s)'}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-[#07101F] transition-transform ${
+                  autoRefresh ? 'translate-x-6' : 'translate-x-1'
+                }`}
+              />
+            </button>
+          </div>
+        </div>
+
+        {/* Retained Data Warning (When auto-refresh fails but last analysis is kept) */}
+        {warningMessage && (
+          <div className="w-full bg-[#332612] border border-amber-500/30 rounded-2xl p-3.5 mb-3 text-xs text-amber-200 shadow-lg flex items-start gap-2.5">
+            <Info className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            <p className="leading-relaxed text-amber-200/90">{warningMessage}</p>
+          </div>
+        )}
 
         {/* Category Tabs */}
         <div className="w-full flex items-center gap-2 overflow-x-auto pb-2 mb-3 no-scrollbar">
@@ -387,7 +509,7 @@ export default function App() {
 
           {/* Action Button */}
           <button
-            onClick={handleAnalyze}
+            onClick={() => handleAnalyze(false)}
             disabled={loading}
             className={`w-full h-13 rounded-xl font-extrabold text-sm tracking-wide uppercase transition-all shadow-lg flex items-center justify-center gap-2 ${
               loading
