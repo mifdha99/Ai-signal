@@ -16,7 +16,6 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mifdha99.universalsignal.data.model.Candle
-import com.mifdha99.universalsignal.engine.TechnicalAnalysisEngine
 import com.mifdha99.universalsignal.engine.calculateEmaSeries
 import kotlin.math.max
 import kotlin.math.min
@@ -28,16 +27,6 @@ private val Ema9Color = Color(0xFF69A7FF)
 private val Ema21Color = Color(0xFFF59E0B)
 private val Ema50Color = Color(0xFFA855F7)
 
-/**
- * Calculates exponential moving average series for given values and period.
- * Mathematical formula:
- * Multiplier = 2.0 / (period + 1.0)
- * Current EMA = (Current Price * Multiplier) + (Previous EMA * (1.0 - Multiplier))
- */
-private fun getEmaSeries(values: List<Double>, period: Int): List<Double> {
-    return TechnicalAnalysisEngine.calculateEmaSeries(values, period)
-}
-
 @Composable
 fun CandleChart(
     candles: List<Candle>,
@@ -48,9 +37,9 @@ fun CandleChart(
     // Show last 45 candles for clean mobile display
     val displayCandles = candles.takeLast(45)
     val closes = displayCandles.map { it.close }
-    val ema9 = TechnicalAnalysisEngine.calculateEmaSeries(closes, 9)
-    val ema21 = TechnicalAnalysisEngine.calculateEmaSeries(closes, 21)
-    val ema50 = TechnicalAnalysisEngine.calculateEmaSeries(closes, 50)
+    val ema9 = calculateEmaSeries(closes, 9)
+    val ema21 = calculateEmaSeries(closes, 21)
+    val ema50 = calculateEmaSeries(closes, 50)
 
     val minPrice = displayCandles.minOf { it.low }
     val maxPrice = displayCandles.maxOf { it.high }
