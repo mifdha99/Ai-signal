@@ -140,6 +140,7 @@ object TechnicalAnalysisEngine {
         atr: Double,
         momentumUp: Boolean
     ): ConfluenceResult {
+        val formattedRsi = String.format(Locale.US, "%.1f", rsi)
         var bullishScore = 0
         var bearishScore = 0
 
@@ -188,7 +189,7 @@ object TechnicalAnalysisEngine {
                 ConfluenceResult(
                     side = "BUY",
                     confidence = confidence,
-                    reason = "Konfluensi Bullish: Struktur EMA bertingkat naik (EMA9 > EMA21 > EMA50), momentum RSI (${\"%.1f\".format(Locale.US, rsi)}) sehat, dan histogram MACD positif."
+                    reason = "Konfluensi Bullish: Struktur EMA bertingkat naik (EMA9 > EMA21 > EMA50), momentum RSI ($formattedRsi) sehat, dan histogram MACD positif."
                 )
             }
             bearishScore >= 7 && rsi >= 28.0 -> {
@@ -196,13 +197,13 @@ object TechnicalAnalysisEngine {
                 ConfluenceResult(
                     side = "SELL",
                     confidence = confidence,
-                    reason = "Konfluensi Bearish: Struktur EMA bertingkat turun (EMA9 < EMA21 < EMA50), momentum RSI (${\"%.1f\".format(Locale.US, rsi)}) melemah, dan histogram MACD negatif."
+                    reason = "Konfluensi Bearish: Struktur EMA bertingkat turun (EMA9 < EMA21 < EMA50), momentum RSI ($formattedRsi) melemah, dan histogram MACD negatif."
                 )
             }
             else -> {
                 val reasonText = when {
-                    rsi > 72.0 -> "Kondisi pasar Overbought jenuh beli (RSI ${"%.1f".format(Locale.US, rsi)}). Menunggu pullback atau pembentukan base baru."
-                    rsi < 28.0 -> "Kondisi pasar Oversold jenuh jual (RSI ${"%.1f".format(Locale.US, rsi)}). Menunggu konfirmasi pantulan harga sebelum entri."
+                    rsi > 72.0 -> "Kondisi pasar Overbought jenuh beli (RSI $formattedRsi). Menunggu pullback atau pembentukan base baru."
+                    rsi < 28.0 -> "Kondisi pasar Oversold jenuh jual (RSI $formattedRsi). Menunggu konfirmasi pantulan harga sebelum entri."
                     abs(bullishScore - bearishScore) <= 2 -> "Indikator saling bertentangan (Tren dan Momentum tidak searah). Pasar dalam kondisi konsolidasi (Chop/Ranging)."
                     else -> "Konfluensi belum mencapai ambang batas minimum keamanan entri (Skor: $maxPoints / $totalPoints). Disarankan menunggu konfirmasi candle berikutnya."
                 }
