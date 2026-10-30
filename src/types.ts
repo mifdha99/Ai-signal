@@ -19,7 +19,7 @@ export interface Candle {
   volume: number;
 }
 
-export type DataStatus = 'VALID' | 'DELAYED' | 'INCOMPLETE' | 'FAILED';
+export type DataStatus = 'LIVE' | 'VALID' | 'DELAYED' | 'STALE' | 'INCOMPLETE' | 'FAILED';
 
 export interface TradePlan {
   entryPrice: number;

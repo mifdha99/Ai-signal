@@ -101,7 +101,16 @@ object TechnicalAnalysisEngine {
             momentumUp = momentumUp
         )
 
-        val dataStatus = if (instrument.isDelayed) DataStatus.DELAYED else DataStatus.VALID
+        val lastCandleTime = candles.last().time
+        val nowMs = System.currentTimeMillis()
+        val intervalMs = timeframe.durationMinutes * 60 * 1000L
+        val ageMs = nowMs - lastCandleTime
+
+        val dataStatus = when {
+            instrument.isDelayed -> DataStatus.DELAYED
+            ageMs > (intervalMs * 3) && ageMs > 600_000L -> DataStatus.STALE
+            else -> DataStatus.LIVE
+        }
         val now = SimpleDateFormat("HH:mm:ss dd-MM-yyyy", Locale.getDefault()).format(Date())
 
         // Calculate Stop Loss & Take Profit levels for valid BUY/SELL signals

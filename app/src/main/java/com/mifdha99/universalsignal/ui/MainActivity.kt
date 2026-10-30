@@ -565,7 +565,12 @@ fun MainScreen(
             Spacer(Modifier.height(14.dp))
 
             if (candlesList.isNotEmpty()) {
-                CandleChart(candles = candlesList)
+                CandleChart(
+                    candles = candlesList,
+                    signal = res,
+                    timeframe = selectedTimeframe,
+                    instrument = selectedInstrument
+                )
                 Spacer(Modifier.height(14.dp))
             }
 

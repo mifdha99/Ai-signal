@@ -203,7 +203,30 @@ export function analyzeCandles(
     else rsiSeries.push(rsi(closes.slice(0, i + 1), 14));
   }
 
-  const dataStatus: DataStatus = instrument.isDelayed ? 'DELAYED' : 'VALID';
+  const lastCandle = candles[candles.length - 1];
+  const nowMs = Date.now();
+  let tfMinutes = 5;
+  if (frame === '1m') tfMinutes = 1;
+  else if (frame === '3m') tfMinutes = 3;
+  else if (frame === '5m') tfMinutes = 5;
+  else if (frame === '15m') tfMinutes = 15;
+  else if (frame === '30m') tfMinutes = 30;
+  else if (frame === '1h') tfMinutes = 60;
+  else if (frame === '2h') tfMinutes = 120;
+  else if (frame === '4h') tfMinutes = 240;
+  else if (frame === '1d') tfMinutes = 1440;
+
+  const intervalMs = tfMinutes * 60 * 1000;
+  const ageMs = nowMs - (lastCandle ? lastCandle.time : 0);
+
+  let dataStatus: DataStatus = 'LIVE';
+  if (instrument.isDelayed) {
+    dataStatus = 'DELAYED';
+  } else if (ageMs > intervalMs * 3 && ageMs > 600000) {
+    dataStatus = 'STALE';
+  } else {
+    dataStatus = 'LIVE';
+  }
 
   // Calculate Stop Loss & Take Profit levels for valid BUY/SELL signals
   const tradePlan = calculateTradePlan(side, recent, atr14, candles, instrument.symbol);
