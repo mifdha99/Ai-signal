@@ -21,6 +21,22 @@ export interface Candle {
 
 export type DataStatus = 'VALID' | 'DELAYED' | 'INCOMPLETE' | 'FAILED';
 
+export interface TradePlan {
+  entryPrice: number;
+  stopLoss: number;
+  takeProfit1: number;
+  takeProfit2: number;
+  takeProfit3: number;
+  riskRewardRatio: string;
+  riskDistance: number;
+  precision: number;
+  formattedEntry: string;
+  formattedSl: string;
+  formattedTp1: string;
+  formattedTp2: string;
+  formattedTp3: string;
+}
+
 export interface SignalResult {
   side: 'BUY' | 'SELL' | 'WAIT';
   price: number;
@@ -42,6 +58,7 @@ export interface SignalResult {
   symbol: string;
   frame: string;
   provider: string;
+  tradePlan?: TradePlan | null;
 }
 
 export interface IndicatorData {

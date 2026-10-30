@@ -1,6 +1,6 @@
 {
   "name": "Universal Signal AI",
-  "description": "Technical analysis and trading signal assistant powered by real-time Binance crypto market data, EMA crossovers, RSI, and MACD indicators.",
+  "description": "Multi-asset quantitative technical analysis engine with 15s auto-refresh, EMA confluence, RSI, MACD, and automatic ATR-based Stop Loss (SL) and Take Profit (TP1-TP3) trade plans.",
   "permissions": [],
   "capabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

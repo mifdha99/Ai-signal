@@ -23,6 +23,7 @@ import {
 import { Candle, SignalResult, IndicatorData, AssetInstrument, AssetCategory } from './types';
 import { fetchMarketCandles, analyzeCandles } from './utils/indicators';
 import { PriceChart } from './components/PriceChart';
+import { TradePlanCard } from './components/TradePlanCard';
 
 const INSTRUMENTS: AssetInstrument[] = [
   // CRYPTO (Binance)
@@ -632,6 +633,9 @@ export default function App() {
                 </span>
               </div>
             </div>
+
+            {/* Stop Loss & Take Profit Risk Management Card */}
+            <TradePlanCard result={result} />
 
             {/* Indicator Summary Card */}
             <div className="w-full bg-[#151D30] rounded-2xl border border-slate-800/80 p-5 shadow-xl">

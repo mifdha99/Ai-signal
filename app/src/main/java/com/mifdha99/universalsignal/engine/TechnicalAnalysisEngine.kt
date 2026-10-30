@@ -104,6 +104,15 @@ object TechnicalAnalysisEngine {
         val dataStatus = if (instrument.isDelayed) DataStatus.DELAYED else DataStatus.VALID
         val now = SimpleDateFormat("HH:mm:ss dd-MM-yyyy", Locale.getDefault()).format(Date())
 
+        // Calculate Stop Loss & Take Profit levels for valid BUY/SELL signals
+        val tradePlan = calculateTradePlan(
+            side = side,
+            entryPrice = currentPrice,
+            atr = atr14,
+            candles = candles,
+            symbol = instrument.symbol
+        )
+
         return SignalResult(
             side = side,
             price = currentPrice,
@@ -124,7 +133,8 @@ object TechnicalAnalysisEngine {
             timestamp = System.currentTimeMillis(),
             symbol = instrument.symbol,
             timeframe = timeframe.label,
-            provider = providerName
+            provider = providerName,
+            tradePlan = tradePlan
         )
     }
 
@@ -274,6 +284,97 @@ object TechnicalAnalysisEngine {
         }
         return atr
     }
+
+    /**
+     * Determines proper decimal precision based on price scale and asset characteristics.
+     */
+    fun getDecimalPrecision(price: Double, symbol: String): Int {
+        if (symbol.contains("JPY", ignoreCase = true)) return 3
+        if (symbol.contains("/", ignoreCase = true)) {
+            return if (price >= 100.0) 3 else 5
+        }
+        return when {
+            price >= 1000.0 -> 2
+            price >= 100.0 -> 2
+            price >= 1.0 -> 4
+            else -> 6
+        }
+    }
+
+    /**
+     * Calculates deterministic Stop Loss (SL) and Take Profit (TP1, TP2, TP3) levels
+     * based on market volatility (ATR) and recent price structure (swing low/high).
+     *
+     * Rules:
+     * - BUY: Entry = current price, SL < Entry, Entry < TP1 < TP2 < TP3.
+     * - SELL: Entry = current price, SL > Entry, Entry > TP1 > TP2 > TP3.
+     * - Risk/Reward ratios: 1:1 (TP1), 1:2 (TP2), 1:3 (TP3).
+     * - Returns null if side is WAIT or inputs are invalid.
+     */
+    fun calculateTradePlan(
+        side: String,
+        entryPrice: Double,
+        atr: Double,
+        candles: List<Candle>,
+        symbol: String
+    ): TradePlan? {
+        if (side != "BUY" && side != "SELL") return null
+        if (entryPrice <= 0.0 || entryPrice.isNaN() || entryPrice.isInfinite()) return null
+
+        val precision = getDecimalPrecision(entryPrice, symbol)
+
+        // Effective ATR: ensure positive and non-zero
+        val effectiveAtr = if (atr > 0.0 && !atr.isNaN() && !atr.isInfinite()) {
+            atr
+        } else {
+            entryPrice * 0.01 // 1% fallback volatility
+        }
+
+        // Lookback window for market structure (last 10 candles)
+        val lookback = candles.takeLast(10)
+
+        val riskDistance = if (side == "BUY") {
+            val swingLow = if (lookback.isNotEmpty()) lookback.minOf { it.low } else (entryPrice - 1.5 * effectiveAtr)
+            val structuralRisk = if (swingLow < entryPrice) {
+                (entryPrice - swingLow) + (0.5 * effectiveAtr)
+            } else {
+                1.5 * effectiveAtr
+            }
+            // Bound risk distance between 1.0 * ATR and 3.5 * ATR, with minimum 0.1% of entry price
+            structuralRisk.coerceIn(1.0 * effectiveAtr, 3.5 * effectiveAtr).coerceAtLeast(entryPrice * 0.001)
+        } else {
+            val swingHigh = if (lookback.isNotEmpty()) lookback.maxOf { it.high } else (entryPrice + 1.5 * effectiveAtr)
+            val structuralRisk = if (swingHigh > entryPrice) {
+                (swingHigh - entryPrice) + (0.5 * effectiveAtr)
+            } else {
+                1.5 * effectiveAtr
+            }
+            structuralRisk.coerceIn(1.0 * effectiveAtr, 3.5 * effectiveAtr).coerceAtLeast(entryPrice * 0.001)
+        }
+
+        val sl = if (side == "BUY") entryPrice - riskDistance else entryPrice + riskDistance
+        val tp1 = if (side == "BUY") entryPrice + (1.0 * riskDistance) else entryPrice - (1.0 * riskDistance)
+        val tp2 = if (side == "BUY") entryPrice + (2.0 * riskDistance) else entryPrice - (2.0 * riskDistance)
+        val tp3 = if (side == "BUY") entryPrice + (3.0 * riskDistance) else entryPrice - (3.0 * riskDistance)
+
+        fun formatPrice(value: Double): String = String.format(Locale.US, "%.${precision}f", value)
+
+        return TradePlan(
+            entryPrice = entryPrice,
+            stopLoss = sl,
+            takeProfit1 = tp1,
+            takeProfit2 = tp2,
+            takeProfit3 = tp3,
+            riskRewardRatio = "1:1 / 1:2 / 1:3",
+            riskDistance = riskDistance,
+            precision = precision,
+            formattedEntry = formatPrice(entryPrice),
+            formattedSl = formatPrice(sl),
+            formattedTp1 = formatPrice(tp1),
+            formattedTp2 = formatPrice(tp2),
+            formattedTp3 = formatPrice(tp3)
+        )
+    }
 }
 
 /**
@@ -284,3 +385,11 @@ fun calculateEmaSeries(values: List<Double>, period: Int): List<Double> =
 
 fun emaSeries(values: List<Double>, period: Int): List<Double> =
     TechnicalAnalysisEngine.calculateEmaSeries(values, period)
+
+fun calculateTradePlan(
+    side: String,
+    entryPrice: Double,
+    atr: Double,
+    candles: List<Candle>,
+    symbol: String
+): TradePlan? = TechnicalAnalysisEngine.calculateTradePlan(side, entryPrice, atr, candles, symbol)

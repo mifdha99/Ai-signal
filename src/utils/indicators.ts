@@ -1,4 +1,4 @@
-import { Candle, SignalResult, IndicatorData, AssetInstrument, DataStatus } from '../types';
+import { Candle, SignalResult, IndicatorData, AssetInstrument, DataStatus, TradePlan } from '../types';
 
 export function emaSeries(values: number[], period: number): number[] {
   if (values.length === 0) return [];
@@ -205,6 +205,9 @@ export function analyzeCandles(
 
   const dataStatus: DataStatus = instrument.isDelayed ? 'DELAYED' : 'VALID';
 
+  // Calculate Stop Loss & Take Profit levels for valid BUY/SELL signals
+  const tradePlan = calculateTradePlan(side, recent, atr14, candles, instrument.symbol);
+
   return {
     signal: {
       side,
@@ -226,7 +229,8 @@ export function analyzeCandles(
       timestamp: Date.now(),
       symbol: instrument.symbol,
       frame,
-      provider: providerName
+      provider: providerName,
+      tradePlan
     },
     indicatorData: {
       candles,
@@ -236,6 +240,65 @@ export function analyzeCandles(
       rsiSeries,
       macdHistSeries
     }
+  };
+}
+
+export function getDecimalPrecision(price: number, symbol: string): number {
+  if (symbol.toLowerCase().includes('jpy')) return 3;
+  if (symbol.includes('/')) {
+    return price >= 100.0 ? 3 : 5;
+  }
+  if (price >= 1000.0) return 2;
+  if (price >= 100.0) return 2;
+  if (price >= 1.0) return 4;
+  return 6;
+}
+
+export function calculateTradePlan(
+  side: 'BUY' | 'SELL' | 'WAIT',
+  entryPrice: number,
+  atr: number,
+  candles: Candle[],
+  symbol: string
+): TradePlan | null {
+  if (side !== 'BUY' && side !== 'SELL') return null;
+  if (!entryPrice || entryPrice <= 0 || isNaN(entryPrice) || !isFinite(entryPrice)) return null;
+
+  const precision = getDecimalPrecision(entryPrice, symbol);
+  const effectiveAtr = (atr > 0 && !isNaN(atr) && isFinite(atr)) ? atr : (entryPrice * 0.01);
+
+  const lookback = candles.slice(-10);
+
+  let riskDistance: number;
+  if (side === 'BUY') {
+    const swingLow = lookback.length > 0 ? Math.min(...lookback.map(c => c.low)) : (entryPrice - 1.5 * effectiveAtr);
+    const structuralRisk = swingLow < entryPrice ? ((entryPrice - swingLow) + 0.5 * effectiveAtr) : (1.5 * effectiveAtr);
+    riskDistance = Math.max(entryPrice * 0.001, Math.min(3.5 * effectiveAtr, Math.max(1.0 * effectiveAtr, structuralRisk)));
+  } else {
+    const swingHigh = lookback.length > 0 ? Math.max(...lookback.map(c => c.high)) : (entryPrice + 1.5 * effectiveAtr);
+    const structuralRisk = swingHigh > entryPrice ? ((swingHigh - entryPrice) + 0.5 * effectiveAtr) : (1.5 * effectiveAtr);
+    riskDistance = Math.max(entryPrice * 0.001, Math.min(3.5 * effectiveAtr, Math.max(1.0 * effectiveAtr, structuralRisk)));
+  }
+
+  const stopLoss = side === 'BUY' ? entryPrice - riskDistance : entryPrice + riskDistance;
+  const takeProfit1 = side === 'BUY' ? entryPrice + (1.0 * riskDistance) : entryPrice - (1.0 * riskDistance);
+  const takeProfit2 = side === 'BUY' ? entryPrice + (2.0 * riskDistance) : entryPrice - (2.0 * riskDistance);
+  const takeProfit3 = side === 'BUY' ? entryPrice + (3.0 * riskDistance) : entryPrice - (3.0 * riskDistance);
+
+  return {
+    entryPrice,
+    stopLoss,
+    takeProfit1,
+    takeProfit2,
+    takeProfit3,
+    riskRewardRatio: '1:1 / 1:2 / 1:3',
+    riskDistance,
+    precision,
+    formattedEntry: entryPrice.toFixed(precision),
+    formattedSl: stopLoss.toFixed(precision),
+    formattedTp1: takeProfit1.toFixed(precision),
+    formattedTp2: takeProfit2.toFixed(precision),
+    formattedTp3: takeProfit3.toFixed(precision)
   };
 }
 

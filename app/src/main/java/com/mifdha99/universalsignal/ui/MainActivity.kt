@@ -31,6 +31,7 @@ import com.mifdha99.universalsignal.engine.TechnicalAnalysisEngine
 import com.mifdha99.universalsignal.ui.components.CandleChart
 import com.mifdha99.universalsignal.ui.components.SignalCard
 import com.mifdha99.universalsignal.ui.components.TechnicalIndicatorCard
+import com.mifdha99.universalsignal.ui.components.TradePlanCard
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -558,6 +559,9 @@ fun MainScreen(
         // Result Views
         result?.let { res ->
             SignalCard(result = res)
+            Spacer(Modifier.height(14.dp))
+
+            TradePlanCard(result = res)
             Spacer(Modifier.height(14.dp))
 
             if (candlesList.isNotEmpty()) {

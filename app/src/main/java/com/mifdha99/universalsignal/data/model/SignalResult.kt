@@ -20,5 +20,6 @@ data class SignalResult(
     val timestamp: Long,
     val symbol: String,
     val timeframe: String,
-    val provider: String
+    val provider: String,
+    val tradePlan: TradePlan? = null
 )
