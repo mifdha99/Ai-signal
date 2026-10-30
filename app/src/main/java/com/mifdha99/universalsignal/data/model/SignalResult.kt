@@ -21,5 +21,8 @@ data class SignalResult(
     val symbol: String,
     val timeframe: String,
     val provider: String,
-    val tradePlan: TradePlan? = null
+    val tradePlan: TradePlan? = null,
+    val unifiedConfluence: UnifiedConfluenceBreakdown? = null,
+    val relevantNews: List<NewsItem> = emptyList(),
+    val nearbyEconomicEvents: List<EconomicEvent> = emptyList()
 )

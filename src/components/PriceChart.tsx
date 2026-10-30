@@ -13,7 +13,8 @@ import {
   Radio, 
   SlidersHorizontal,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Newspaper
 } from 'lucide-react';
 
 interface PriceChartProps {
@@ -32,6 +33,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({ data, signal }) => {
   const [showLevels, setShowLevels] = useState<boolean>(true);
   const [showEma, setShowEma] = useState<boolean>(true);
   const [showOscillators, setShowOscillators] = useState<boolean>(true);
+  const [showNews, setShowNews] = useState<boolean>(true);
   const [showInfoPanel, setShowInfoPanel] = useState<boolean>(true);
 
   // Drag pan refs
@@ -395,6 +397,20 @@ export const PriceChart: React.FC<PriceChartProps> = ({ data, signal }) => {
             <span>OSC</span>
           </button>
 
+          {/* Toggle News Markers */}
+          <button
+            onClick={() => setShowNews(!showNews)}
+            title="Toggle Penanda Berita Berdampak (News Markers)"
+            className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-mono font-bold transition-all ${
+              showNews 
+                ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-sm' 
+                : 'bg-slate-800/80 text-slate-400 border border-slate-700 hover:text-white'
+            }`}
+          >
+            <Newspaper className="w-3.5 h-3.5" />
+            <span>NEWS</span>
+          </button>
+
           {/* Zoom controls */}
           <div className="flex items-center bg-slate-800 rounded-lg p-0.5 border border-slate-700">
             <button
@@ -671,6 +687,31 @@ export const PriceChart: React.FC<PriceChartProps> = ({ data, signal }) => {
                 </g>
               );
             })()
+          )}
+
+          {/* NEWS IMPACT MARKERS (when enabled) */}
+          {showNews && data.newsMarkers && data.newsMarkers.length > 0 && (
+            data.newsMarkers.map((marker, mIdx) => {
+              // Find closest candle index
+              const candleIdx = visibleCandles.findIndex(c => Math.abs(c.time - marker.time) < 3600000);
+              if (candleIdx < 0) return null;
+              const targetCandle = visibleCandles[candleIdx];
+              const mx = candleIdx * candleSlotWidth + candleSlotWidth / 2;
+              const my = Math.max(15, getYForPrice(targetCandle.high) - 20);
+              const isCrit = marker.impact === 'CRITICAL';
+              const markerBg = isCrit ? '#A855F7' : marker.impact === 'HIGH' ? '#EF4444' : '#F59E0B';
+
+              return (
+                <g key={`news-marker-${mIdx}`} className="cursor-pointer">
+                  <title>{`${marker.title} (Sentimen: ${marker.sentimentScore > 0 ? '+' : ''}${marker.sentimentScore})`}</title>
+                  <circle cx={mx} cy={my} r="7" fill={markerBg} stroke="#090E1A" strokeWidth="1.5" />
+                  <text x={mx} y={my + 2.5} textAnchor="middle" fill="#FFFFFF" fontSize="7" fontWeight="900" fontFamily="sans-serif">
+                    N
+                  </text>
+                  <line x1={mx} y1={my + 7} x2={mx} y2={getYForPrice(targetCandle.high)} stroke={markerBg} strokeWidth="1" strokeDasharray="1 1" />
+                </g>
+              );
+            })
           )}
 
           {/* TRADE PLAN HORIZONTAL LEVEL LINES (ENTRY, SL, TP1, TP2, TP3) */}

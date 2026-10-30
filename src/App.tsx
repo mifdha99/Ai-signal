@@ -18,12 +18,32 @@ import {
   ShieldAlert,
   SlidersHorizontal,
   Key,
-  Info
+  Info,
+  Newspaper,
+  Calendar,
+  BarChart3,
+  Layers,
+  Radio
 } from 'lucide-react';
-import { Candle, SignalResult, IndicatorData, AssetInstrument, AssetCategory } from './types';
-import { fetchMarketCandles, analyzeCandles } from './utils/indicators';
+import { 
+  Candle, 
+  SignalResult, 
+  IndicatorData, 
+  AssetInstrument, 
+  AssetCategory,
+  NewsItem,
+  EconomicEvent,
+  FundamentalProfile,
+  UnifiedConfluenceBreakdown
+} from './types';
+import { fetchMarketCandles, analyzeCandles, calculateTradePlan } from './utils/indicators';
+import { computeUnifiedDecision } from './utils/newsEngine';
 import { PriceChart } from './components/PriceChart';
 import { TradePlanCard } from './components/TradePlanCard';
+import { NewsDashboard } from './components/NewsDashboard';
+import { EconomicCalendarWidget } from './components/EconomicCalendarWidget';
+import { NewsAlertBanner } from './components/NewsAlertBanner';
+import { EvaluationBacktestPanel } from './components/EvaluationBacktestPanel';
 
 const INSTRUMENTS: AssetInstrument[] = [
   // CRYPTO (Binance)
@@ -114,6 +134,13 @@ export default function App() {
   const [error, setError] = useState<string>('');
   const [warningMessage, setWarningMessage] = useState<string>('');
   const [updatedAt, setUpdatedAt] = useState<string>('');
+
+  // Universal News & Fundamental Intelligence Engine State
+  const [newsList, setNewsList] = useState<NewsItem[]>([]);
+  const [calendarEvents, setCalendarEvents] = useState<EconomicEvent[]>([]);
+  const [fundamentalProfile, setFundamentalProfile] = useState<FundamentalProfile | null>(null);
+  const [activeTab, setActiveTab] = useState<'SIGNAL' | 'NEWS' | 'CALENDAR' | 'EVALUATION'>('SIGNAL');
+  const [newsAlertDismissed, setNewsAlertDismissed] = useState<boolean>(false);
   
   const [showChart, setShowChart] = useState<boolean>(true);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
@@ -135,6 +162,53 @@ export default function App() {
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, []);
+
+  // Fetch News, Economic Calendar, and Instrument Fundamental Profile
+  const fetchMacroData = useCallback(async (sym: string) => {
+    try {
+      // 1. Fetch News
+      const newsPromise = fetch(`/api/news?symbol=${encodeURIComponent(sym)}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(json => {
+          if (json && json.data) setNewsList(json.data);
+        })
+        .catch(() => {});
+
+      // 2. Fetch Calendar
+      const calPromise = fetch('/api/calendar')
+        .then(r => r.ok ? r.json() : null)
+        .then(json => {
+          if (json && json.data) setCalendarEvents(json.data);
+        })
+        .catch(() => {});
+
+      // 3. Fetch Fundamental Profile
+      const fundPromise = fetch(`/api/fundamental?symbol=${encodeURIComponent(sym)}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(json => {
+          if (json && json.data) setFundamentalProfile(json.data);
+        })
+        .catch(() => {});
+
+      await Promise.all([newsPromise, calPromise, fundPromise]);
+    } catch {}
+  }, []);
+
+  // Initial and instrument switch macro data fetch
+  useEffect(() => {
+    fetchMacroData(instrument.symbol);
+    setNewsAlertDismissed(false);
+  }, [instrument.symbol, fetchMacroData]);
+
+  // Periodic background refresh for news & calendar (every 3 minutes, separate from 15s price refresh)
+  useEffect(() => {
+    const macroInterval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        fetchMacroData(instrument.symbol);
+      }
+    }, 180000);
+    return () => clearInterval(macroInterval);
+  }, [instrument.symbol, fetchMacroData]);
 
   const filteredInstruments = useMemo(() => {
     return INSTRUMENTS.filter((item) => {
@@ -189,17 +263,43 @@ export default function App() {
 
     try {
       const { candles, providerName } = await fetchMarketCandles(instrument, frame, twelveDataKey);
-      const { signal, indicatorData: indData } = analyzeCandles(candles, instrument, frame, providerName);
+      const { signal: baseSignal, indicatorData: indData } = analyzeCandles(candles, instrument, frame, providerName);
       
-      setResult(signal);
+      // UNIVERSAL NEWS & FUNDAMENTAL INTELLIGENCE SYNTHESIS
+      const unified = computeUnifiedDecision(baseSignal, newsList, calendarEvents, fundamentalProfile);
+
+      // Overwrite / enrich signal with unified confluence
+      const finalSignal: SignalResult = {
+        ...baseSignal,
+        side: unified.finalSide,
+        confidenceScore: unified.finalConfidence,
+        reason: unified.unifiedReason,
+        unifiedConfluence: unified.unifiedConfluence,
+        sentimentScore: unified.unifiedConfluence.newsScore,
+        relevantNews: unified.relevantNews,
+        nearbyEconomicEvents: unified.nearbyEvents,
+        tradePlan: (unified.finalSide === 'BUY' || unified.finalSide === 'SELL') 
+          ? calculateTradePlan(unified.finalSide, baseSignal.price, baseSignal.atr14, candles, instrument.symbol)
+          : null
+      };
+
+      // Populate news markers for MT5 Candlestick Chart
+      indData.newsMarkers = newsList.map(n => ({
+        time: n.publishedAt,
+        title: n.title,
+        impact: n.impact,
+        sentimentScore: n.sentimentScore
+      }));
+
+      setResult(finalSignal);
       setIndicatorData(indData);
       setUpdatedAt(new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
-      setHistory((prev) => [signal, ...prev.slice(0, 19)]);
+      setHistory((prev) => [finalSignal, ...prev.slice(0, 19)]);
       setError('');
       setWarningMessage('');
       setBackoffSeconds(0);
       setSecondsRemaining(15);
-      playSignalSound(signal.side);
+      playSignalSound(finalSignal.side);
     } catch (e: any) {
       const errMsg = e?.message || 'Data tidak berhasil diambil. Periksa koneksi internet atau coba lagi.';
       const isRateLimit = errMsg.includes('429') || errMsg.toLowerCase().includes('rate limit');
@@ -220,7 +320,7 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, [instrument, frame, twelveDataKey, loading, result, playSignalSound]);
+  }, [instrument, frame, twelveDataKey, loading, result, playSignalSound, newsList, calendarEvents, fundamentalProfile]);
 
   useEffect(() => {
     setSecondsRemaining(15);
@@ -310,18 +410,85 @@ export default function App() {
         <div className="text-center mb-5">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-[#69A7FF] text-xs font-semibold uppercase tracking-wider mb-2">
             <Sparkles className="w-3.5 h-3.5" />
-            <span>Quantitative Multi-Indicator Confluence Engine</span>
+            <span>Universal News, Fundamental & Technical Intelligence</span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white uppercase">
             Universal Signal AI
           </h1>
           <p className="text-xs sm:text-sm font-semibold tracking-wider text-[#9CAAC2] uppercase mt-1">
-            Sinyal Teknikal • Mode Analisis Multi-Aset
+            Konfluensi 4 Pilar • Sinyal Teknikal, Berita & Fundamental Makro
           </p>
         </div>
 
-        {/* Auto-Refresh Status & Control Bar */}
-        <div className="w-full bg-[#151D30] rounded-2xl border border-slate-800/80 p-3.5 mb-3 shadow-lg flex items-center justify-between">
+        {/* Top Feature Navigation Tabs */}
+        <div className="w-full grid grid-cols-2 sm:grid-cols-4 gap-1.5 p-1.5 bg-[#151D30] rounded-2xl border border-slate-800/80 mb-3 text-xs font-bold shadow-lg">
+          <button
+            onClick={() => setActiveTab('SIGNAL')}
+            className={`py-2 px-2 rounded-xl transition-all flex items-center justify-center gap-1.5 ${
+              activeTab === 'SIGNAL'
+                ? 'bg-blue-600 text-white shadow-md'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+            }`}
+          >
+            <Radio className="w-3.5 h-3.5" />
+            <span>Sinyal & MT5</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('NEWS')}
+            className={`py-2 px-2 rounded-xl transition-all flex items-center justify-center gap-1.5 ${
+              activeTab === 'NEWS'
+                ? 'bg-blue-600 text-white shadow-md'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+            }`}
+          >
+            <Newspaper className="w-3.5 h-3.5" />
+            <span>News & Sentimen</span>
+            {newsList.length > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-blue-900 text-blue-200">
+                {newsList.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('CALENDAR')}
+            className={`py-2 px-2 rounded-xl transition-all flex items-center justify-center gap-1.5 ${
+              activeTab === 'CALENDAR'
+                ? 'bg-blue-600 text-white shadow-md'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+            }`}
+          >
+            <Calendar className="w-3.5 h-3.5" />
+            <span>Kalender</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('EVALUATION')}
+            className={`py-2 px-2 rounded-xl transition-all flex items-center justify-center gap-1.5 ${
+              activeTab === 'EVALUATION'
+                ? 'bg-blue-600 text-white shadow-md'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+            }`}
+          >
+            <BarChart3 className="w-3.5 h-3.5" />
+            <span>Backtest</span>
+          </button>
+        </div>
+
+        {/* Real-Time News & Conflict Alert Banner */}
+        {!newsAlertDismissed && result?.unifiedConfluence && (
+          <NewsAlertBanner
+            confluence={result.unifiedConfluence}
+            onDismiss={() => setNewsAlertDismissed(true)}
+          />
+        )}
+
+        {/* TAB 1: SIGNAL & MT5 CHART VIEW */}
+        {activeTab === 'SIGNAL' && (
+          <>
+            {/* Auto-Refresh Status & Control Bar */}
+            <div className="w-full bg-[#151D30] rounded-2xl border border-slate-800/80 p-3.5 mb-3 shadow-lg flex items-center justify-between">
           <div className="flex flex-col">
             <div className="flex items-center gap-2">
               <span
@@ -634,6 +801,83 @@ export default function App() {
               </div>
             </div>
 
+            {/* 4-PILLAR UNIFIED CONFLUENCE BREAKDOWN CARD */}
+            {result.unifiedConfluence && (
+              <div className="w-full bg-[#151D30] rounded-2xl border border-slate-800/80 p-5 shadow-xl">
+                <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-800">
+                  <div className="flex items-center gap-2">
+                    <Layers className="w-4 h-4 text-purple-400" />
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-white">
+                      Konfluensi 4 Pilar: Teknikal, Berita & Makro
+                    </h3>
+                  </div>
+                  <span className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded ${
+                    result.unifiedConfluence.isConflictDetected 
+                      ? 'bg-amber-950 text-amber-300 border border-amber-500/40' 
+                      : result.unifiedConfluence.compositeScore >= 30 
+                      ? 'bg-emerald-950 text-emerald-300 border border-emerald-500/40' 
+                      : result.unifiedConfluence.compositeScore <= -30 
+                      ? 'bg-rose-950 text-rose-300 border border-rose-500/40' 
+                      : 'bg-slate-800 text-slate-300'
+                  }`}>
+                    Skor Komposit: {result.unifiedConfluence.compositeScore > 0 ? `+${result.unifiedConfluence.compositeScore}` : result.unifiedConfluence.compositeScore}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs font-mono">
+                  {/* Pilar 1: Teknikal */}
+                  <div className="p-2.5 rounded-xl bg-slate-900/70 border border-slate-800">
+                    <span className="text-[10px] text-slate-400 block uppercase">1. Teknikal (40%)</span>
+                    <strong className={`text-sm block mt-0.5 ${
+                      result.unifiedConfluence.technicalScore > 0 ? 'text-[#27D69B]' : result.unifiedConfluence.technicalScore < 0 ? 'text-[#FF5D70]' : 'text-slate-400'
+                    }`}>
+                      {result.unifiedConfluence.technicalScore > 0 ? `+${result.unifiedConfluence.technicalScore}` : result.unifiedConfluence.technicalScore}
+                    </strong>
+                    <span className="text-[10px] text-slate-500">EMA, RSI, MACD</span>
+                  </div>
+
+                  {/* Pilar 2: Berita */}
+                  <div className="p-2.5 rounded-xl bg-slate-900/70 border border-slate-800">
+                    <span className="text-[10px] text-slate-400 block uppercase">2. Berita (30%)</span>
+                    <strong className={`text-sm block mt-0.5 ${
+                      result.unifiedConfluence.newsScore > 0 ? 'text-[#27D69B]' : result.unifiedConfluence.newsScore < 0 ? 'text-[#FF5D70]' : 'text-slate-400'
+                    }`}>
+                      {result.unifiedConfluence.newsScore > 0 ? `+${result.unifiedConfluence.newsScore}` : result.unifiedConfluence.newsScore}
+                    </strong>
+                    <span className="text-[10px] text-slate-500">Sentimen Berita</span>
+                  </div>
+
+                  {/* Pilar 3: Fundamental */}
+                  <div className="p-2.5 rounded-xl bg-slate-900/70 border border-slate-800">
+                    <span className="text-[10px] text-slate-400 block uppercase">3. Makro (20%)</span>
+                    <strong className={`text-sm block mt-0.5 ${
+                      result.unifiedConfluence.fundamentalScore > 0 ? 'text-[#27D69B]' : result.unifiedConfluence.fundamentalScore < 0 ? 'text-[#FF5D70]' : 'text-slate-400'
+                    }`}>
+                      {result.unifiedConfluence.fundamentalScore > 0 ? `+${result.unifiedConfluence.fundamentalScore}` : result.unifiedConfluence.fundamentalScore}
+                    </strong>
+                    <span className="text-[10px] text-slate-500">Kebijakan Moneter</span>
+                  </div>
+
+                  {/* Pilar 4: Jendela Risiko */}
+                  <div className="p-2.5 rounded-xl bg-slate-900/70 border border-slate-800">
+                    <span className="text-[10px] text-slate-400 block uppercase">4. Risiko (10%)</span>
+                    <strong className={`text-sm block mt-0.5 ${
+                      result.unifiedConfluence.highImpactNewsActive ? 'text-rose-400' : 'text-emerald-400'
+                    }`}>
+                      {result.unifiedConfluence.highImpactNewsActive ? 'HIGH IMPACT' : 'STABIL'}
+                    </strong>
+                    <span className="text-[10px] text-slate-500">Jendela Kalender</span>
+                  </div>
+                </div>
+
+                {result.unifiedConfluence.conflictReason && (
+                  <div className="mt-3 p-2.5 rounded-xl bg-amber-950/40 border border-amber-500/30 text-amber-200 text-xs leading-relaxed">
+                    <strong>Catatan Konflik:</strong> {result.unifiedConfluence.conflictReason}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Stop Loss & Take Profit Risk Management Card */}
             <TradePlanCard result={result} />
 
@@ -671,7 +915,7 @@ export default function App() {
               {/* Confluence Reason Explanation */}
               <div className="mt-3.5 p-3 rounded-xl bg-slate-900/70 border border-slate-800">
                 <span className="text-[11px] font-bold text-slate-300 block mb-1">
-                  Alasan Analisis Teknikal:
+                  Alasan Analisis Terpadu:
                 </span>
                 <p className="text-xs text-[#9CAAC2] leading-relaxed">
                   {result.reason}
@@ -688,7 +932,7 @@ export default function App() {
               <div className="w-full">
                 <div className="flex items-center justify-between mb-2 px-1">
                   <span className="text-xs font-bold uppercase tracking-wider text-[#9CAAC2]">
-                    Visualisasi Candlestick & EMA
+                    Visualisasi Candlestick & EMA (MT5 Live)
                   </span>
                   <button
                     onClick={() => setShowChart(!showChart)}
@@ -702,6 +946,37 @@ export default function App() {
               </div>
             )}
           </div>
+        )}
+        </>
+        )}
+
+        {/* TAB 2: NEWS & SENTIMENT DASHBOARD */}
+        {activeTab === 'NEWS' && (
+          <NewsDashboard
+            news={newsList}
+            selectedSymbol={instrument.symbol}
+            fundamentalProfile={fundamentalProfile}
+            onSelectInstrument={(sym) => {
+              const target = INSTRUMENTS.find(i => i.symbol === sym);
+              if (target) {
+                setInstrument(target);
+                setActiveTab('SIGNAL');
+              }
+            }}
+          />
+        )}
+
+        {/* TAB 3: ECONOMIC CALENDAR */}
+        {activeTab === 'CALENDAR' && (
+          <EconomicCalendarWidget
+            events={calendarEvents}
+            selectedSymbol={instrument.symbol}
+          />
+        )}
+
+        {/* TAB 4: BACKTEST & EVALUATION */}
+        {activeTab === 'EVALUATION' && (
+          <EvaluationBacktestPanel />
         )}
 
         {/* Disclaimer Card */}

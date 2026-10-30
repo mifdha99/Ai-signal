@@ -1,6 +1,6 @@
 {
   "name": "Universal Signal AI",
-  "description": "Multi-asset quantitative technical analysis engine with 15s auto-refresh, EMA confluence, RSI, MACD, and automatic ATR-based Stop Loss (SL) and Take Profit (TP1-TP3) trade plans.",
+  "description": "Multi-asset quantitative technical, fundamental, and news intelligence engine with 15s auto-refresh, MT5 candlestick chart, economic calendar, sentiment scoring, and automatic ATR Stop Loss and Take Profit trade plans.",
   "permissions": [],
   "capabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
