@@ -139,8 +139,10 @@ fun TechnicalIndicatorCard(result: SignalResult) {
 @Composable
 fun StatusBadge(status: DataStatus) {
     val (color, text) = when (status) {
+        DataStatus.LIVE -> Pair(ColorGreen, "REALTIME")
         DataStatus.VALID -> Pair(ColorGreen, "REALTIME")
         DataStatus.DELAYED -> Pair(ColorAmber, "DELAYED 15M")
+        DataStatus.STALE -> Pair(ColorRed, "STALE")
         DataStatus.INCOMPLETE -> Pair(ColorAmber, "DATA KURANG")
         DataStatus.FAILED -> Pair(ColorRed, "GAGAL")
     }
